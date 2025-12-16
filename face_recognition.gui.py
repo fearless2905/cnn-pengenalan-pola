@@ -5,218 +5,172 @@ import os
 import pandas as pd
 from datetime import datetime
 import tkinter as tk
-from tkinter import messagebox
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from tkinter.simpledialog import askstring
 from tkinter import filedialog
 from PIL import Image
-import shutil
 import time
 
-
 # =====================================================
-# 1️⃣ LOAD MODEL DAN LABEL
+# 1️⃣ LOAD MODEL & LABEL (WAJIB SINKRON)
 # =====================================================
 print("[INFO] Memuat model CNN...")
-model = tf.keras.models.load_model('face_cnn_model.h5')
-class_names = sorted(os.listdir('dataset/train'))
+model = tf.keras.models.load_model("face_cnn_model.h5")
+
+class_indices = np.load("class_indices.npy", allow_pickle=True).item()
+class_names = {v: k for k, v in class_indices.items()}
+print("[INFO] Label mapping:", class_names)
 
 # =====================================================
-# 2️⃣ FILE ABSENSI OTOMATIS
+# 2️⃣ FILE ABSENSI
 # =====================================================
-absen_file = 'absensi.xlsx'
-
+absen_file = "absensi.xlsx"
 if not os.path.exists(absen_file):
-    df = pd.DataFrame(columns=['Nama', 'Waktu'])
-    df.to_excel(absen_file, index=False)
+    pd.DataFrame(columns=["Nama", "Waktu"]).to_excel(absen_file, index=False)
+
+last_attendance = {}
+ATTENDANCE_COOLDOWN = 30  # detik
 
 def catat_absensi(nama):
+    now = time.time()
+    if nama in last_attendance and now - last_attendance[nama] < ATTENDANCE_COOLDOWN:
+        return
+
+    last_attendance[nama] = now
     waktu = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     df = pd.read_excel(absen_file)
-
-    if nama not in df['Nama'].values:
-        new_data = pd.DataFrame([[nama, waktu]], columns=['Nama', 'Waktu'])
-        df = pd.concat([df, new_data], ignore_index=True)
-        df.to_excel(absen_file, index=False)
-
-        print(f"[✔] {nama} tercatat pada {waktu}")
+    df = pd.concat(
+        [df, pd.DataFrame([[nama, waktu]], columns=["Nama", "Waktu"])],
+        ignore_index=True
+    )
+    df.to_excel(absen_file, index=False)
+    print(f"[✔] Absensi: {nama} - {waktu}")
 
 # =====================================================
-# 3️⃣ DETEKSI KAMERA OTOMATIS
+# 3️⃣ KAMERA
 # =====================================================
-def get_available_camera():
+def get_camera():
     for i in range(5):
         cap = cv2.VideoCapture(i)
         if cap.isOpened():
-            print(f"[INFO] Kamera index {i} digunakan.")
+            print(f"[INFO] Kamera index {i} digunakan")
             return cap
-    print("[ERROR] Tidak ada kamera terdeteksi.")
     return None
 
 # =====================================================
-# 4️⃣ FUNGSI UTAMA: MULAI ABSENSI
+# 4️⃣ MULAI ABSENSI
 # =====================================================
 def mulai_absensi():
-    cap = get_available_camera()
+    cap = get_camera()
     if cap is None:
-        messagebox.showerror("Error", "Kamera tidak terdeteksi!")
+        messagebox.showerror("Error", "Kamera tidak ditemukan")
         return
 
-    cap.set(3, 640)
-    cap.set(4, 480)
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    messagebox.showinfo("Info", "Tekan 'q' untuk menghentikan absensi.")
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+
+    messagebox.showinfo("Info", "Tekan 'q' untuk menghentikan absensi")
 
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("[ERROR] Kamera tidak aktif.")
             break
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
         for (x, y, w, h) in faces:
-            face_roi = frame[y:y+h, x:x+w]
-            face_roi = cv2.resize(face_roi, (150, 150))
-            face_roi = np.expand_dims(face_roi, axis=0) / 255.0
+            face = frame[y:y+h, x:x+w]
 
-            predictions = model.predict(face_roi)
-            class_index = np.argmax(predictions)
-            confidence = np.max(predictions)
+            # ===== PREPROCESS (SAMA DENGAN TRAINING)
+            face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+            face = cv2.resize(face, (150, 150))
+            face = np.expand_dims(face, axis=0) / 255.0
 
-            if confidence > 0.8:
-                nama = class_names[class_index]
+            pred = model.predict(face, verbose=0)
+            idx = np.argmax(pred)
+            conf = pred[0][idx]
+
+            if conf >= 0.6:
+                nama = class_names[idx]
                 catat_absensi(nama)
-                label = f"{nama} ({confidence*100:.1f}%)"
+                label = f"{nama} ({conf*100:.1f}%)"
                 color = (0, 255, 0)
             else:
                 label = "Tidak Dikenal"
                 color = (0, 0, 255)
 
             cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-            cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+            cv2.putText(frame, label, (x, y-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
-        cv2.imshow('Face Recognition - Absensi Otomatis', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        cv2.imshow("Absensi Wajah Otomatis", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
 
 # =====================================================
-# 5️⃣ LIHAT DATA ABSENSI
+# 5️⃣ LIHAT ABSENSI
 # =====================================================
 def lihat_absensi():
-    if not os.path.exists(absen_file):
-        messagebox.showinfo("Info", "Belum ada data absensi.")
-        return
-
     df = pd.read_excel(absen_file)
     if df.empty:
-        messagebox.showinfo("Info", "Belum ada nama yang tercatat.")
+        messagebox.showinfo("Info", "Belum ada data absensi")
         return
 
     top = tk.Toplevel(window)
     top.title("Data Absensi")
-    top.geometry("400x300")
+    top.geometry("500x350")
 
-    tree = ttk.Treeview(top, columns=("Nama", "Waktu"), show='headings')
+    frame = tk.Frame(top)
+    frame.pack(fill=tk.BOTH, expand=True)
+
+    # Scrollbar vertikal
+    scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    tree = ttk.Treeview(
+        frame,
+        columns=("Nama", "Waktu"),
+        show="headings",
+        yscrollcommand=scrollbar.set
+    )
+
+    scrollbar.config(command=tree.yview)
+
     tree.heading("Nama", text="Nama")
     tree.heading("Waktu", text="Waktu")
+    tree.column("Nama", width=150)
+    tree.column("Waktu", width=300)
+
     tree.pack(fill=tk.BOTH, expand=True)
 
     for _, row in df.iterrows():
         tree.insert("", tk.END, values=(row["Nama"], row["Waktu"]))
 
-        def tambah_mahasiswa():
-            nama = askstring("Tambah Mahasiswa", "Masukkan Nama Mahasiswa:")
-            if not nama:
-                return
 
-            # Folder dataset
-            train_path = f"dataset/train/{nama}"
-            test_path = f"dataset/test/{nama}"
-            os.makedirs(train_path, exist_ok=True)
-            os.makedirs(test_path, exist_ok=True)
-
-            cap = get_available_camera()
-            if cap is None:
-                messagebox.showerror("Error", "Kamera tidak tersedia!")
-                return
-
-            face_cascade = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            )
-
-            messagebox.showinfo(
-                "Info",
-                "Wajah akan otomatis terdeteksi setiap detik\nTekan 'q' untuk selesai"
-            )
-
-            count = 0
-            last_capture_time = time.time()
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
-                current_time = time.time()
-                if len(faces) > 0 and (current_time - last_capture_time) >= 1.0:
-                    # Capture the first detected face
-                    (x, y, w, h) = faces[0]
-                    face = frame[y:y + h, x:x + w]
-                    face = cv2.resize(face, (150, 150))
-
-                    if count < 20:
-                        cv2.imwrite(f"{train_path}/{count}.jpg", face)
-                    else:
-                        cv2.imwrite(f"{test_path}/{count}.jpg", face)
-
-                    count += 1
-                    print(f"[INFO] Capture {count}")
-                    last_capture_time = current_time
-
-                for (x, y, w, h) in faces:
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                cv2.imshow("Tambah Data Mahasiswa", frame)
-
-                key = cv2.waitKey(1) & 0xFF
-
-                if key == ord('q') or count >= 30:
-                    break
-
-            cap.release()
-            cv2.destroyAllWindows()
-
-            messagebox.showinfo(
-                "Sukses",
-                f"Data wajah {nama} berhasil disimpan!\nSilakan retrain model."
-            )
-
-def get_list_mahasiswa():
-    base_path = "dataset/train"
-    if not os.path.exists(base_path):
-        os.makedirs(base_path)
+# =====================================================
+# 6️⃣ MANAJEMEN DATASET
+# =====================================================
+def get_students():
+    base = "dataset/train"
+    os.makedirs(base, exist_ok=True)
     return sorted([
-        d for d in os.listdir(base_path)
-        if os.path.isdir(os.path.join(base_path, d))
+        d for d in os.listdir(base)
+        if os.path.isdir(os.path.join(base, d))
     ])
 
 def tambah_mahasiswa():
-    nama = askstring("Tambah Mahasiswa", "Masukkan Nama Mahasiswa:")
+    nama = askstring("Tambah Mahasiswa", "Masukkan nama:")
     if not nama:
         return
 
     os.makedirs(f"dataset/train/{nama}", exist_ok=True)
     os.makedirs(f"dataset/test/{nama}", exist_ok=True)
-
-    messagebox.showinfo("Sukses", f"Mahasiswa {nama} berhasil ditambahkan")
     refresh_dataset_window()
 
 def tambah_foto(nama, mode):
@@ -224,103 +178,93 @@ def tambah_foto(nama, mode):
         title="Pilih Foto Wajah",
         filetypes=[("Image Files", "*.jpg *.png *.jpeg")]
     )
-
     if not files:
         return
 
     save_path = f"dataset/{mode}/{nama}"
-
-    for file in files:
-        img = Image.open(file).convert("RGB")
+    for f in files:
+        img = Image.open(f).convert("RGB")
         img = img.resize((150, 150))
+        img.save(os.path.join(save_path, os.path.basename(f)))
 
-        filename = os.path.basename(file)
-        img.save(os.path.join(save_path, filename))
+    messagebox.showinfo("Sukses", f"{len(files)} foto ditambahkan ke {mode}/{nama}")
 
-    messagebox.showinfo(
-        "Sukses",
-        f"{len(files)} foto berhasil ditambahkan ke {mode}/{nama}"
-    )
-
-def buka_manajemen_dataset():
+def buka_dataset():
     global dataset_window
     dataset_window = tk.Toplevel(window)
-    dataset_window.title("Manajemen Dataset Mahasiswa")
+    dataset_window.title("Manajemen Dataset")
     dataset_window.geometry("500x400")
 
-    frame_top = tk.Frame(dataset_window)
-    frame_top.pack(pady=10)
+    tk.Button(dataset_window, text="➕ Tambah Mahasiswa",
+              command=tambah_mahasiswa).pack(pady=10)
 
-    btn_add = tk.Button(
-        frame_top,
-        text="➕ Tambah Mahasiswa",
-        bg="#4CAF50",
-        fg="white",
-        font=("Arial", 10, "bold"),
-        command=tambah_mahasiswa
-    )
-    btn_add.pack()
+    for nama in get_students():
+        frame = tk.LabelFrame(dataset_window, text=nama)
+        frame.pack(fill=tk.X, padx=10, pady=5)
 
-    frame_list = tk.Frame(dataset_window)
-    frame_list.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-    for nama in get_list_mahasiswa():
-        card = tk.LabelFrame(frame_list, text=nama, padx=10, pady=5)
-        card.pack(fill=tk.X, pady=5)
-
-        btn_train = tk.Button(
-            card,
-            text="Tambah Foto Train",
-            command=lambda n=nama: tambah_foto(n, "train")
-        )
-        btn_train.pack(side=tk.LEFT, padx=5)
-
-        btn_test = tk.Button(
-            card,
-            text="Tambah Foto Test",
-            command=lambda n=nama: tambah_foto(n, "test")
-        )
-        btn_test.pack(side=tk.LEFT, padx=5)
+        tk.Button(frame, text="Tambah Train",
+                  command=lambda n=nama: tambah_foto(n, "train")).pack(side=tk.LEFT, padx=5)
+        tk.Button(frame, text="Tambah Test",
+                  command=lambda n=nama: tambah_foto(n, "test")).pack(side=tk.LEFT, padx=5)
 
 def refresh_dataset_window():
     dataset_window.destroy()
-    buka_manajemen_dataset()
-
+    buka_dataset()
 
 # =====================================================
-# 6️⃣ GUI UTAMA TKINTER
+# 7️⃣ GUI UTAMA
 # =====================================================
 window = tk.Tk()
-window.title("Face Recognition - Absensi Otomatis")
-window.geometry("400x350")
+window.title("Absensi Wajah Otomatis")
+window.geometry("420x360")
 window.configure(bg="#1E1E1E")
 
-title_label = tk.Label(window, text="📸 Absensi Wajah Otomatis", fg="white", bg="#1E1E1E", font=("Arial", 16, "bold"))
-title_label.pack(pady=20)
-
-btn_mulai = tk.Button(window, text="▶️  Mulai Absensi", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), width=25, height=2, command=mulai_absensi)
-btn_mulai.pack(pady=10)
-
-btn_lihat = tk.Button(window, text="📋  Lihat Data Absensi", bg="#2196F3", fg="white", font=("Arial", 12, "bold"), width=25, height=2, command=lihat_absensi)
-btn_lihat.pack(pady=10)
-
-btn_keluar = tk.Button(window, text="❌  Keluar", bg="#F44336", fg="white", font=("Arial", 12, "bold"), width=25, height=2, command=window.destroy)
-btn_keluar.pack(pady=10)
-
-btn_dataset = tk.Button(
+tk.Label(
     window,
-    text="🗂️  Manajemen Dataset",
-    bg="#FF9800",
+    text="📸 Absensi Wajah Otomatis",
     fg="white",
-    font=("Arial", 12, "bold"),
+    bg="#1E1E1E",
+    font=("Arial", 16, "bold")
+).pack(pady=20)
+
+tk.Button(
+    window,
+    text="▶️ Mulai Absensi",
+    bg="#4CAF50",
+    fg="white",
     width=25,
     height=2,
-    command=buka_manajemen_dataset
-)
-btn_dataset.pack(pady=10)
+    command=mulai_absensi
+).pack(pady=10)
 
+tk.Button(
+    window,
+    text="📋 Lihat Data Absensi",
+    bg="#2196F3",
+    fg="white",
+    width=25,
+    height=2,
+    command=lihat_absensi
+).pack(pady=10)
 
-credit = tk.Label(window, text="Dibuat oleh: Kelompok 5", bg="#1E1E1E", fg="#AAAAAA", font=("Arial", 9))
-credit.pack(side=tk.BOTTOM, pady=10)
+tk.Button(
+    window,
+    text="🗂️ Manajemen Dataset",
+    bg="#FF9800",
+    fg="white",
+    width=25,
+    height=2,
+    command=buka_dataset
+).pack(pady=10)
+
+tk.Button(
+    window,
+    text="❌ Keluar",
+    bg="#F44336",
+    fg="white",
+    width=25,
+    height=2,
+    command=window.destroy
+).pack(pady=10)
 
 window.mainloop()

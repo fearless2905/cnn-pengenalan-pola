@@ -12,7 +12,7 @@ from PIL import Image
 import time
 
 # =====================================================
-# 1️⃣ LOAD MODEL & LABEL (WAJIB SINKRON)
+# 1️⃣ LOAD MODEL & LABEL
 # =====================================================
 print("[INFO] Memuat model CNN...")
 model = tf.keras.models.load_model("face_cnn_model.h5")
@@ -29,7 +29,7 @@ if not os.path.exists(absen_file):
     pd.DataFrame(columns=["Nama", "Waktu"]).to_excel(absen_file, index=False)
 
 last_attendance = {}
-ATTENDANCE_COOLDOWN = 30  # detik
+ATTENDANCE_COOLDOWN = 30  
 
 def catat_absensi(nama):
     now = time.time()
@@ -84,7 +84,6 @@ def mulai_absensi():
         for (x, y, w, h) in faces:
             face = frame[y:y+h, x:x+w]
 
-            # ===== PREPROCESS (SAMA DENGAN TRAINING)
             face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
             face = cv2.resize(face, (150, 150))
             face = np.expand_dims(face, axis=0) / 255.0
@@ -128,8 +127,7 @@ def lihat_absensi():
 
     frame = tk.Frame(top)
     frame.pack(fill=tk.BOTH, expand=True)
-
-    # Scrollbar vertikal
+    
     scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 

@@ -1,7 +1,3 @@
-# ============================================
-# FACE TRAINING USING CNN (NO VAL - STABLE)
-# ============================================
-
 import tensorflow as tf
 import numpy as np
 import random
@@ -19,7 +15,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import classification_report, confusion_matrix
 
 # ================================
-# 1️⃣ SEED (REPRODUCIBLE)
+# 1️⃣ SEED 
 # ================================
 SEED = 42
 tf.random.set_seed(SEED)
@@ -67,7 +63,7 @@ test_data = test_datagen.flow_from_directory(
 )
 
 # ================================
-# 4️⃣ SAVE LABEL MAPPING (WAJIB)
+# 4️⃣ SAVE LABEL MAPPING 
 # ================================
 np.save("class_indices.npy", train_data.class_indices)
 print("✔ Label Mapping:", train_data.class_indices)
@@ -114,7 +110,7 @@ model.compile(
 model.summary()
 
 # ================================
-# 7️⃣ CALLBACK (TANPA EARLY STOP)
+# 7️⃣ CALLBACK 
 # ================================
 callbacks = [
     ReduceLROnPlateau(

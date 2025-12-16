@@ -11,6 +11,7 @@ from tkinter.simpledialog import askstring
 from tkinter import filedialog
 from PIL import Image
 import shutil
+import time
 
 
 # =====================================================
@@ -151,10 +152,11 @@ def lihat_absensi():
 
             messagebox.showinfo(
                 "Info",
-                "Tekan 'c' untuk capture wajah\nTekan 'q' untuk selesai"
+                "Wajah akan otomatis terdeteksi setiap detik\nTekan 'q' untuk selesai"
             )
 
             count = 0
+            last_capture_time = time.time()
             while True:
                 ret, frame = cap.read()
                 if not ret:
@@ -163,18 +165,10 @@ def lihat_absensi():
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-                for (x, y, w, h) in faces:
-                    face = frame[y:y + h, x:x + w]
-                    face = cv2.resize(face, (150, 150))
-
-                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                cv2.imshow("Tambah Data Mahasiswa", frame)
-
-                key = cv2.waitKey(1) & 0xFF
-
-                # Capture wajah
-                if key == ord('c') and len(faces) > 0:
+                current_time = time.time()
+                if len(faces) > 0 and (current_time - last_capture_time) >= 1.0:
+                    # Capture the first detected face
+                    (x, y, w, h) = faces[0]
                     face = frame[y:y + h, x:x + w]
                     face = cv2.resize(face, (150, 150))
 
@@ -185,6 +179,14 @@ def lihat_absensi():
 
                     count += 1
                     print(f"[INFO] Capture {count}")
+                    last_capture_time = current_time
+
+                for (x, y, w, h) in faces:
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                cv2.imshow("Tambah Data Mahasiswa", frame)
+
+                key = cv2.waitKey(1) & 0xFF
 
                 if key == ord('q') or count >= 30:
                     break
